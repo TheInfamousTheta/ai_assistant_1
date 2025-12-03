@@ -5,48 +5,53 @@ import asyncio
 import aiohttp
 import av
 import uuid
+import logging
 from typing import Any
 from livekit.agents import tts, utils
 from livekit import rtc
 
+logger = logging.getLogger("murf_tts")
+
 class MurfTTS(tts.TTS):
-    def __init__(self):
+    def __init__(self, config: dict | None = None):
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=False), 
+            # We standardize on 24kHz for Falcon
             sample_rate=24000, 
             num_channels=1
         )
         self.api_key = os.getenv("MURF_API_KEY")
-        self.url = "https://api.murf.ai/v1/speech/stream" 
+        self.url = "https://api.murf.ai/v1/speech/stream"
+        self.config = config if config is not None else {}
 
-    def synthesize(
-        self,
-        text: str,
-        *,
-        conn_options: Any = None, 
-    ) -> "MurfStream":
+    def synthesize(self, text: str, *, conn_options: Any = None) -> "MurfStream":
         return MurfStream(self, text, conn_options)
 
-
 class MurfStream(tts.ChunkedStream):
-    def __init__(
-        self, 
-        tts_instance: MurfTTS, 
-        text: str, 
-        conn_options: Any
-    ):
+    def __init__(self, tts_instance: MurfTTS, text: str, conn_options: Any):
         super().__init__(tts=tts_instance, input_text=text, conn_options=conn_options)
         self._tts = tts_instance
 
     async def _run(self, *args):
+        await asyncio.sleep(0.02)
         request_id = str(uuid.uuid4())
         
+        is_hindi = any("\u0900" <= char <= "\u097f" for char in self._input_text)
+        user_voice = self._tts.config.get("voice_id", "en-US-zion")
+        
+        if is_hindi:
+            target_voice = "en-US-zion" 
+            target_locale = "hi-IN"
+        else:
+            target_voice = user_voice
+            target_locale = "en-US"
+
         try:
             async with aiohttp.ClientSession() as session:
                 payload = {
-                    "voice_id": "en-US-matthew", 
+                    "voice_id": target_voice,
                     "text": self._input_text,
-                    "multi_native_locale": "en-US",
+                    "multi_native_locale": target_locale,
                     "model": "FALCON",
                     "format": "MP3",
                     "sampleRate": 24000,
@@ -60,46 +65,59 @@ class MurfStream(tts.ChunkedStream):
                 async with session.post(self._tts.url, json=payload, headers=headers) as resp:
                     if resp.status != 200:
                         error_msg = await resp.text()
-                        print(f"Murf API Error {resp.status}: {error_msg}")
+                        logger.error(f"MURF API ERROR {resp.status}: {error_msg}")
+                        await asyncio.sleep(1.0) 
                         return 
 
                     mp3_data = await resp.read()
                     
-                    # FIX: Run decoding in a separate thread to avoid blocking the event loop
-                    await asyncio.to_thread(self._decode_and_send_sync, mp3_data, request_id)
+                    if mp3_data:
+                        await asyncio.to_thread(self._decode_and_send_sync, mp3_data, request_id)
 
         except Exception as e:
-            print(f"Murf Generation Exception: {e}")
+            logger.error(f"Murf Exception: {e}")
+            await asyncio.sleep(1.0) 
 
     def _decode_and_send_sync(self, mp3_data, request_id):
         """
-        Synchronous decoding running in a thread.
-        Using send_nowait is safe here because the channel is thread-safe.
+        Decodes MP3 and batches into fixed 20ms frames for smooth playback.
         """
         try:
+            # Configuration for 20ms frames at 24kHz
+            SAMPLE_RATE = 24000
+            CHANNELS = 1
+            BYTES_PER_SAMPLE = 2 # 16-bit = 2 bytes
+            # 20ms = 0.02 seconds. 
+            # Samples per frame = 24000 * 0.02 = 480 samples
+            # Bytes per frame = 480 * 2 = 960 bytes
+            FRAME_SIZE_BYTES = int(SAMPLE_RATE * 0.02 * BYTES_PER_SAMPLE) 
+            
+            audio_buffer = bytearray()
+
             with av.open(io.BytesIO(mp3_data), mode='r') as container:
                 stream = container.streams.audio[0]
-                resampler = av.AudioResampler(
-                    format='s16',
-                    layout='mono',
-                    rate=24000
-                )
+                resampler = av.AudioResampler(format='s16', layout='mono', rate=SAMPLE_RATE)
 
                 for frame in container.decode(stream):
                     for resampled_frame in resampler.resample(frame):
-                        pcm_bytes = resampled_frame.to_ndarray().tobytes()
-                        
-                        # Push audio frame
-                        self._event_ch.send_nowait(
-                            tts.SynthesizedAudio(
-                                request_id=request_id, 
-                                frame=rtc.AudioFrame(
-                                    data=pcm_bytes, 
-                                    sample_rate=24000, 
-                                    num_channels=1, 
-                                    samples_per_channel=len(pcm_bytes) // 2 
+                        # Add new data to buffer
+                        audio_buffer.extend(resampled_frame.to_ndarray().tobytes())
+
+                        # While we have enough data for a full 20ms frame, send it
+                        while len(audio_buffer) >= FRAME_SIZE_BYTES:
+                            chunk = audio_buffer[:FRAME_SIZE_BYTES]
+                            audio_buffer = audio_buffer[FRAME_SIZE_BYTES:]
+                            
+                            self._event_ch.send_nowait(
+                                tts.SynthesizedAudio(
+                                    request_id=request_id, 
+                                    frame=rtc.AudioFrame(
+                                        data=bytes(chunk), 
+                                        sample_rate=SAMPLE_RATE, 
+                                        num_channels=CHANNELS, 
+                                        samples_per_channel=len(chunk) // BYTES_PER_SAMPLE
+                                    )
                                 )
                             )
-                        )
         except Exception as e:
-            print(f"Audio Decoding Error: {e}")
+            logger.error(f"Decoding Error: {e}")
