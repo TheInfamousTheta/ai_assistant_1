@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "272202532312",
+    "project_id": "ai-assistant-ea8f1",
+    "storage_bucket": "ai-assistant-ea8f1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:272202532312:android:dc1ec5981d7916ad06dead",
+        "android_client_info": {
+          "package_name": "com.theinfamoustheta.ai_assistant"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "272202532312-alvoprgdf1n9o4tujpo928ui0ftfittj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCLHvh94RBdsgynK_DYMhw_VtkTyFJPVIs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "272202532312-alvoprgdf1n9o4tujpo928ui0ftfittj.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "272202532312-i3rs8ojf3giddrcbjrs4g1ltcqd576o4.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.theinfamoustheta.aiAssistant"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,2 +1,4 @@
 backend/.env
 frontend/.env
+backend/service-account.json
+backend/__pycache__/

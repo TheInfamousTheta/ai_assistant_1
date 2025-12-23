@@ -33,10 +33,18 @@ class MurfStream(tts.ChunkedStream):
         self._tts = tts_instance
 
     async def _run(self, *args):
+        # --- FIX 1: CLEAN INPUT TEXT ---
+        # Replace newlines and excessive whitespace with single spaces.
+        # This prevents the TTS engine from treating newlines as 'end of generation' markers.
+        clean_text = " ".join(self._input_text.split())
+
+        # Log the cleaned text to verify what is actually sent
+        logger.info(f"🗣️  TTS INPUT (Cleaned): '{clean_text}'")
+
         await asyncio.sleep(0.02)
         request_id = str(uuid.uuid4())
         
-        is_hindi = any("\u0900" <= char <= "\u097f" for char in self._input_text)
+        is_hindi = any("\u0900" <= char <= "\u097f" for char in clean_text)
         user_voice = self._tts.config.get("voice_id", "en-US-zion")
         
         if is_hindi:
@@ -50,7 +58,7 @@ class MurfStream(tts.ChunkedStream):
             async with aiohttp.ClientSession() as session:
                 payload = {
                     "voice_id": target_voice,
-                    "text": self._input_text,
+                    "text": clean_text, # Use the sanitized text
                     "multi_native_locale": target_locale,
                     "model": "FALCON",
                     "format": "MP3",
@@ -62,7 +70,9 @@ class MurfStream(tts.ChunkedStream):
                     "Content-Type": "application/json"
                 }
 
-                async with session.post(self._tts.url, json=payload, headers=headers) as resp:
+                # Added timeout to prevent hanging on long generations
+                # FIX: Use ClientTimeout object instead of raw integer
+                async with session.post(self._tts.url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                     if resp.status != 200:
                         error_msg = await resp.text()
                         logger.error(f"MURF API ERROR {resp.status}: {error_msg}")
@@ -119,5 +129,24 @@ class MurfStream(tts.ChunkedStream):
                                     )
                                 )
                             )
+            
+            # --- FIX 2: FLUSH REMAINING BUFFER ---
+            # If there is leftover audio (less than 20ms), pad it with silence and send it.
+            if len(audio_buffer) > 0:
+                padding_size = FRAME_SIZE_BYTES - len(audio_buffer)
+                audio_buffer.extend(b'\x00' * padding_size) # Pad with silence (zeros)
+                
+                self._event_ch.send_nowait(
+                    tts.SynthesizedAudio(
+                        request_id=request_id, 
+                        frame=rtc.AudioFrame(
+                            data=bytes(audio_buffer), 
+                            sample_rate=SAMPLE_RATE, 
+                            num_channels=CHANNELS, 
+                            samples_per_channel=len(audio_buffer) // BYTES_PER_SAMPLE
+                        )
+                    )
+                )
+
         except Exception as e:
             logger.error(f"Decoding Error: {e}")

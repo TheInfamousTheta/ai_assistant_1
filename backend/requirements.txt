@@ -1,6 +1,19 @@
-livekit-agents
-livekit-plugins-silero
+livekit-agents>=0.8.0
+livekit-api>=0.6.0
 livekit-plugins-deepgram
 livekit-plugins-openai
-python-dotenv
-aiohttp
+livekit-plugins-silero
+
+av>=12.0.0  # PyAV for decoding audio in murf_tts.py
+
+aiohttp>=3.9.0
+python-dotenv>=1.0.0
+
+fastapi>=0.110.0
+uvicorn>=0.29.0
+pydantic>=2.7.0
+
+google-auth>=2.29.0
+requests>=2.31.0
+
+firebase-admin>=6.0.0
