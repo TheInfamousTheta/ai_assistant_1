@@ -15,6 +15,7 @@ from livekit import rtc
 from murf_tts import MurfTTS  
 from firebase_config import get_firestore_db
 from typing import Any
+from tools import get_weather
 
 load_dotenv()
 logger = logging.getLogger("voice-agent")
@@ -57,6 +58,7 @@ async def entrypoint(ctx: JobContext):
             "You are fully bilingual in Hindi and English. "
             "If the user speaks Hindi, reply in Hindi (using Devanagari script). "
             "If the user speaks English, reply in English. "
+            "You can also use tools to check the current weather in various locations in Northeast India when asked."
         )
     )
 
@@ -81,7 +83,8 @@ async def entrypoint(ctx: JobContext):
             api_key=os.getenv("GROQ_API_KEY") or "",
             model="llama-3.1-8b-instant", 
         ),
-        tts=MurfTTS(config=voice_state),                   
+        tts=MurfTTS(config=voice_state),
+        tools=[get_weather],
     )
 
     @ctx.room.local_participant.register_rpc_method("change_voice")
